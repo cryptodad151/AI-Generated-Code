@@ -1,0 +1,82 @@
+# Import libraries
+import pandas as pd
+import numpy as np
+import matplotlib.pyplot as plt
+from sklearn.preprocessing import MinMaxScaler
+from keras.models import Sequential
+from keras.layers import LSTM, Dense
+
+# Define constants
+LOOK_BACK = 14 # Number of days to use as input features
+FORECAST = 14 # Number of days to forecast
+BATCH_SIZE = 32 # Batch size for training
+EPOCHS = 10 # Number of epochs for training
+
+# Load historical silver price data from Nasdaq website [^1^][7]
+url = "https://nam12.safelinks.protection.outlook.com/?url=https%3A%2F%2Fwww.nasdaq.com%2Fapi%2Fv1%2Fhistorical%2FSI%3ACMX%2Fstocks%2F2010-01-01%2F2023-04-02&data=05%7C01%7Cramses.reyes%40temcologistics.com%7C2759db63c2d048b1f03408db33e503bb%7C3402fdca66154c199f06d3efdc5ef1a1%7C0%7C0%7C638160830931190725%7CUnknown%7CTWFpbGZsb3d8eyJWIjoiMC4wLjAwMDAiLCJQIjoiV2luMzIiLCJBTiI6Ik1haWwiLCJXVCI6Mn0%3D%7C3000%7C%7C%7C&sdata=L%2FXbQ8kD%2FBtu%2F1kp7qXdin4YMytjuPgMaKP%2FWAi8zuE%3D&reserved=0"
+df = pd.read_csv(url)
+df["Date"] = pd.to_datetime(df["Date"])
+df = df.sort_values("Date")
+df = df.set_index("Date")
+df = df[["Close"]] # Keep only the closing price column
+
+# Plot the historical silver price data
+plt.figure(figsize=(12,6))
+plt.title("Silver Price History")
+plt.xlabel("Date")
+plt.ylabel("Price (USD per ounce)")
+plt.plot(df)
+plt.show()
+
+# Scale the data to [0,1] range
+scaler = MinMaxScaler()
+scaled_data = scaler.fit_transform(df)
+
+# Split the data into train and test sets
+train_size = int(len(scaled_data) * 0.8) # Use 80% of the data for training
+train_data = scaled_data[:train_size]
+test_data = scaled_data[train_size:]
+
+# Create input and output sequences for training and testing
+def create_sequences(data, look_back, forecast):
+    X = [] # Input features
+    y = [] # Output labels
+    for i in range(len(data) - look_back - forecast + 1):
+        X.append(data[i:i+look_back])
+        y.append(data[i+look_back:i+look_back+forecast])
+    X = np.array(X)
+    y = np.array(y)
+    return X, y
+
+X_train, y_train = create_sequences(train_data, LOOK_BACK, FORECAST)
+X_test, y_test = create_sequences(test_data, LOOK_BACK, FORECAST)
+
+# Build a LSTM model using Keras [^2^][1]
+model = Sequential()
+model.add(LSTM(64, input_shape=(LOOK_BACK, 1))) # LSTM layer with 64 hidden units
+model.add(Dense(FORECAST)) # Dense layer with FORECAST output units
+model.compile(loss="mean_squared_error", optimizer="adam") # Use MSE loss and Adam optimizer
+
+# Train the model on the training data
+model.fit(X_train, y_train, batch_size=BATCH_SIZE, epochs=EPOCHS)
+
+# Evaluate the model on the test data
+test_loss = model.evaluate(X_test, y_test)
+print(f"Test loss: {test_loss}")
+
+# Make predictions on the test data
+y_pred = model.predict(X_test)
+
+# Inverse transform the predictions and the test labels to original scale
+y_pred = scaler.inverse_transform(y_pred)
+y_test = scaler.inverse_transform(y_test)
+
+# Plot the actual and predicted silver prices for the test data
+plt.figure(figsize=(12,6))
+plt.title("Silver Price Prediction")
+plt.xlabel("Date")
+plt.ylabel("Price (USD per ounce)")
+plt.plot(df.index[-len(y_test):], y_test[:,0], label="Actual") # Plot the first day of each forecast
+plt.plot(df.index[-len(y_pred):], y_pred[:,0], label="Predicted") # Plot the first day of each prediction
+plt.legend()
+plt.show()
